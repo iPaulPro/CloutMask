@@ -1,0 +1,36 @@
+{
+  "name": "CloutMask",
+  "description": "Browse BitClout as any user",
+  "version": "1.0.0",
+  "manifest_version": 3,
+  "author": "Paul Burke",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://bitclout.com/*"
+      ],
+      "js": [
+        "main.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "images/*"
+      ],
+      "matches": [
+        "https://bitclout.com/*"
+      ]
+    }
+  ],
+  "permissions": [
+    "storage"
+  ],
+  "icons": {
+    "16": "/images/icon_16.png",
+    "32": "/images/icon_32.png",
+    "48": "/images/icon_48.png",
+    "128": "/images/icon_128.png"
+  }
+}
