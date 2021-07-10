@@ -1,9 +1,10 @@
 {
   "name": "CloutMask",
-  "description": "Browse BitClout as any user",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "manifest_version": 3,
+  "description": "Browse BitClout as any user",
   "author": "Paul Burke",
+  "homepage_url": "https://github.com/iPaulPro/CloutMask",
   "content_scripts": [
     {
       "matches": [
