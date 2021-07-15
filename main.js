@@ -1,53 +1,86 @@
 "use strict"
 
+let isLookingUpHasPressedMaskButton
+
+const hasPressedMaskButton = () => new Promise((resolve) => {
+  isLookingUpHasPressedMaskButton = true
+  chrome.storage.local.get(['hasPressedMaskButton'], items => {
+    isLookingUpHasPressedMaskButton = false
+    if (chrome.runtime.lastError) return resolve(false)
+    resolve(items.hasPressedMaskButton)
+  })
+})
+
+const setHasPressedMaskButton = () => {
+  chrome.storage.local.set({hasPressedMaskButton: true})
+}
+
 const getLoggedInPublicKey = function () {
   const key = window.localStorage.getItem('lastLoggedInUser')
-  if (!key) return undefined
-  return JSON.parse(key)
+  return key && JSON.parse(key)
 }
 
 const getIdentityUsers = () => {
-  let users = window.localStorage.getItem('identityUsers')
-  if (!users) return undefined
-  return JSON.parse(users)
+  const users = window.localStorage.getItem('identityUsers')
+  return users && JSON.parse(users)
 }
 
 const getLoggedInIdentityUser = () => {
-  let identityUsers = getIdentityUsers()
-  if (identityUsers) return identityUsers[getLoggedInPublicKey()]
-  return undefined
+  const identityUsers = getIdentityUsers()
+  return identityUsers && identityUsers[getLoggedInPublicKey()]
 }
 
 const isMaskedUser = (identityUser) => {
-  return identityUser && identityUser['encryptedSeedHex'] === undefined
+  return identityUser && identityUser['isMaskedUser']
 }
 
 const isLoggedInAsMaskedUser = () => {
   const loggedInIdentityUser = getLoggedInIdentityUser()
-  if (loggedInIdentityUser) return isMaskedUser(loggedInIdentityUser)
-  return undefined
+  return loggedInIdentityUser && isMaskedUser(loggedInIdentityUser)
+}
+
+const getMaskedIdentityUsers = () => {
+  const identityUsers = getIdentityUsers()
+  if (!identityUsers) return
+
+  const maskedUsers = []
+  for (const key in identityUsers) {
+    const identityUser = identityUsers[key]
+    if (identityUser.isMaskedUser) maskedUsers.push(identityUser)
+  }
+  return maskedUsers
 }
 
 const getPublicKeyFromPage = (page) => {
   const keyElement = page.querySelector('.creator-profile__ellipsis-restriction')
-  if (!keyElement) return undefined
-  return keyElement.innerText.trim()
+  return keyElement && keyElement.innerText.trim()
 }
 
 const addPublicKeyToIdentityUsers = (key) => {
   const identityUsers = getIdentityUsers()
   if (!identityUsers || identityUsers[key]) return
 
-  identityUsers[key] = {"network": "mainnet"}
+  const dummyUser = getLoggedInIdentityUser() || {}
+  dummyUser.isMaskedUser = true
+  identityUsers[key] = dummyUser
+
   window.localStorage.setItem('identityUsers', JSON.stringify(identityUsers))
   window.localStorage.setItem('lastLoggedInUser', `"${key}"`)
 
   window.location.reload()
+
+  setHasPressedMaskButton()
+}
+
+function switchToUnmaskedAccount(identityUsers) {
+  if (!identityUsers) return
+  const firstKey = Object.keys(identityUsers)[0]
+  if (firstKey) window.localStorage.setItem('lastLoggedInUser', `"${firstKey}"`)
 }
 
 const removePublicKeyFromIdentityUsers = (key) => {
   const identityUsers = getIdentityUsers()
-  if (!identityUsers || identityUsers[key]['encryptedSeedHex']) return
+  if (!identityUsers || (identityUsers[key] && !identityUsers[key]['isMaskedUser'])) return
 
   try {
     delete identityUsers[key]
@@ -56,20 +89,30 @@ const removePublicKeyFromIdentityUsers = (key) => {
     return
   }
 
-  if (key === getLoggedInPublicKey()) {
-    const firstKey = Object.keys(identityUsers)[0]
-    if (firstKey) {
-      window.localStorage.setItem('lastLoggedInUser', `"${firstKey}"`)
-    }
+  if (key === getLoggedInPublicKey()) switchToUnmaskedAccount(identityUsers)
+
+  window.location.reload()
+}
+
+const removeAllMaskedUsers = () => {
+  const identityUsers = getIdentityUsers()
+  const realUsers = {}
+  const loggedInAsMaskedUser = isLoggedInAsMaskedUser()
+
+  for (const key in identityUsers) {
+    const identityUser = identityUsers[key]
+    if (!identityUser.isMaskedUser) realUsers[key] = identityUser
   }
+
+  window.localStorage.setItem('identityUsers', JSON.stringify(realUsers))
+
+  if (loggedInAsMaskedUser) switchToUnmaskedAccount(identityUsers)
 
   window.location.reload()
 }
 
 const createCloutMaskIconElement = () => {
-  const environment = chrome || browser
-  if (!environment) return
-  const iconUrl = environment.runtime.getURL('images/icon.svg')
+  const iconUrl = chrome.runtime.getURL('images/icon.svg')
   const img = document.createElement('img')
   img.width = 16
   img.height = 16
@@ -79,37 +122,59 @@ const createCloutMaskIconElement = () => {
 }
 
 const addCloutMaskButton = (page) => {
-  if (!page || page.querySelector('#clout-mask-button')) return
+  if (isLookingUpHasPressedMaskButton || !page || page.querySelector('#__clout-mask-button')) return
 
   const publicKeyFromPage = getPublicKeyFromPage(page)
   if (!publicKeyFromPage) return
 
+  const identityUsers = getIdentityUsers()
+  if (!identityUsers) return
+
+  const pageIdentityUser = identityUsers[publicKeyFromPage]
+  if (pageIdentityUser && !pageIdentityUser['isMaskedUser']) return
+
   const topBar = page.querySelector('.creator-profile__top-bar')
   if (!topBar) return
 
-  topBar.style.justifyContent = 'flex-end'
-  topBar.style.alignItems = 'center'
+  hasPressedMaskButton().then(hasPressed => {
+    topBar.style.justifyContent = 'flex-end'
+    topBar.style.alignItems = 'center'
 
-  const identityUsers = getIdentityUsers()
-  const pageIdentityUser = identityUsers[publicKeyFromPage]
-  const userAddedByCloutMask = isMaskedUser(pageIdentityUser)
+    const maskButton = document.createElement('button')
+    maskButton.id = '__clout-mask-button'
+    maskButton.className = 'btn btn-sm text-muted fs-14px rounded-pill'
+    maskButton.classList.add(hasPressed ? 'btn-dark' : 'btn-primary')
 
-  const icon = createCloutMaskIconElement().outerHTML
-  const cloutAsButton = document.createElement('button')
-  cloutAsButton.id = 'clout-mask-button'
-  cloutAsButton.className = 'btn btn-dark btn-sm text-muted fs-14px rounded-pill'
+    const icon = createCloutMaskIconElement().outerHTML
+    const userAddedByCloutMask = isMaskedUser(pageIdentityUser)
+    if (userAddedByCloutMask) {
+      maskButton.innerHTML = `${icon} Remove account`
+      maskButton.onclick = () => removePublicKeyFromIdentityUsers(publicKeyFromPage)
+      topBar.appendChild(maskButton)
+    } else if (!pageIdentityUser) {
+      maskButton.setAttribute('bs-toggle', 'tooltip')
+      maskButton.innerHTML = icon
+      maskButton.title = "Add account with CloutMask"
+      maskButton.onclick = () => addPublicKeyToIdentityUsers(publicKeyFromPage)
+      topBar.appendChild(maskButton)
+    }
+  })
+}
 
-  if (userAddedByCloutMask) {
-    cloutAsButton.innerHTML = `${icon} Remove account`
-    cloutAsButton.onclick = () => removePublicKeyFromIdentityUsers(publicKeyFromPage)
-    topBar.appendChild(cloutAsButton)
-  } else if (!pageIdentityUser) {
-    cloutAsButton.setAttribute('bs-toggle', 'tooltip')
-    cloutAsButton.innerHTML = icon
-    cloutAsButton.title = "Add account with CloutMask"
-    cloutAsButton.onclick = () => addPublicKeyToIdentityUsers(publicKeyFromPage)
-    topBar.appendChild(cloutAsButton)
-  }
+const disabledClassName = '__clout-mask-disabled'
+
+const disableElement = (element) => {
+  if (!element) return
+  element.classList.add(disabledClassName)
+  element.disabled = true
+}
+
+const reEnableElements = () => {
+  const disabledElements = document.getElementsByClassName(disabledClassName)
+  Array.from(disabledElements).forEach(element => {
+    element.classList.remove(disabledClassName)
+    element.disabled = false
+  })
 }
 
 const disableFeedPostButtons = () => {
@@ -117,34 +182,22 @@ const disableFeedPostButtons = () => {
   iconRows.forEach((row) => {
     const postButtons = Array.from(row.children)
     postButtons.splice(postButtons.length - 1, 1)
-    postButtons.forEach((button) => {
-      button.style.opacity = '0.5'
-      button.style.pointerEvents = 'none'
-    })
+    postButtons.forEach(disableElement)
   })
-}
-
-const disableElement = (element) => {
-  if (!element || !element.style) return
-  element.style.opacity = '0.5'
-  element.style.pointerEvents = 'none'
-  element.disabled = true
-};
-
-const disableAll = (elements) => {
-  disableElement(elements)
 }
 
 const disableKnownLinks = () => {
   const anchors = document.querySelectorAll(
-    "a[href*='/buy'], a[href*='/sell'], a[href*='/transfer'], a[href*='/select-creator-coin'], a[href*='/send-bitclout'], a[href*='/inbox'], a[href*='/settings'], a[href*='/buy-bitclout'], a[href*='/admin']"
+    "a[href*='/buy'], a[href*='/sell'], a[href*='/transfer'], a[href*='/select-creator-coin'], a[href*='/send-bitclout'], a[href*='/settings'], a[href*='/buy-bitclout'], a[href*='/admin']"
   )
-  anchors.forEach(disableAll)
+  anchors.forEach(disableElement)
 }
 
 const disableClasses = () => {
-  const elements = document.querySelectorAll('.feed-create-post__textarea, .update-profile__image-delete, feed-post-dropdown, app-update-profile-page .btn-primary')
-  elements.forEach(disableAll)
+  const elements = document.querySelectorAll(
+    '.feed-create-post__textarea, .update-profile__image-delete, feed-post-dropdown, app-update-profile-page .btn-primary'
+  )
+  elements.forEach(disableElement)
 }
 
 const disablePostButtons = () => {
@@ -167,14 +220,32 @@ const disableFollowButtons = (mutationsList) => {
 }
 
 const addMaskToAccountSelector = () => {
-  const accountSelectorMaskIconId = '__clout-mask-account-selector-id'
+  const accountSelectorMaskIconId = '__clout-mask-account-selector-icon'
   if (document.getElementById(accountSelectorMaskIconId)) return
+
   const accountName = document.querySelector('.change-account-selector__ellipsis-restriction')
-  const text = accountName.innerText
+  if (!accountName) return
+
   const icon = createCloutMaskIconElement()
   icon.id = accountSelectorMaskIconId
+  icon.classList.add('mr-2')
 
-  accountName.innerHTML = `${icon.outerHTML} ${text}`
+  accountName.innerHTML = `${icon.outerHTML} ${accountName.innerText}`
+}
+
+const addClearAllToAccountSelector = () => {
+  const id = '__clout-mask-clear-all-item'
+  if (document.getElementById(id)) return
+
+  const accountsList = document.querySelector('.change-account-selector_list')
+  if (!accountsList || accountsList.classList.contains('change-account-selector__hover')) return
+
+  const div = document.createElement('div')
+  div.id = id
+  div.innerHTML = `<div class="pl-15px text-link_hover pr-10px pt-10px"> Clear CloutMask </div>`
+  div.onclick = removeAllMaskedUsers
+
+  accountsList.appendChild(div)
 }
 
 const appRootObserverCallback = (mutationsList) => {
@@ -184,6 +255,12 @@ const appRootObserverCallback = (mutationsList) => {
     disableKnownLinks()
     disableClasses()
     disablePostButtons()
+  } else {
+    reEnableElements()
+  }
+
+  if (getMaskedIdentityUsers().length > 0) {
+    addClearAllToAccountSelector()
   }
 
   const profilePage = document.querySelector('app-creator-profile-page')
