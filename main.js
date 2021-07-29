@@ -263,7 +263,7 @@ const appRootObserverCallback = (mutationsList) => {
     addClearAllToAccountSelector()
   }
 
-  const profilePage = document.querySelector('app-creator-profile-page')
+  const profilePage = document.querySelector('creator-profile-page')
   if (profilePage) {
     addCloutMaskButton(profilePage)
   }
