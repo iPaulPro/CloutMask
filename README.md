@@ -1,3 +1,9 @@
+# Deprecated
+
+This extension is now a feature of [BitClout+](https://deso.plus)
+
+----
+
 This extension adds a button to the header of bitclout.com profile pages, that when pressed, allows you to browse the website as that account.
 
 ![Demo](https://i.imgur.com/bAgJTHE.gif)
